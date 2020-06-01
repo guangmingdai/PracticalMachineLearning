@@ -1,0 +1,132 @@
+---
+title: "Practical Machine Learning Project"
+author: "George Dai"
+date: "5/31/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Introduction
+
+In this project assignment, we are asked to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner of the participants how they do the exercises.
+
+## Data Downloading
+
+First, let's load the libraries.
+
+```{r, cache TRUE}
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(randomForest)
+library(corrplot)
+```
+
+Then, let's download the data.
+
+```{r}
+trainURL <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+testURL <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+download.file(trainURL, 'pml-training.csv', method = 'curl')
+download.file(testURL, 'pml-testing.csv', method = 'curl')
+trainRaw <- read.csv('pml-training.csv')
+testRaw <- read.csv('pml-testing.csv')
+trainDim <- dim(trainRaw)
+testDim <- dim(testRaw)
+```
+
+We have `r trainDim[1]` observations in the training set and `r testDim[1]` with a total of `r trainDim[2]` variables.
+
+## Data Processing
+
+In this section, we are going to clean the dataset by removing observations with missing values and variables that are not used.
+
+```{r, cache = TRUE}
+trainRaw <- trainRaw[, colSums(is.na(trainRaw)) == 0]
+testRaw <- testRaw[, colSums(is.na(testRaw)) == 0]
+col.rm <- c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+training.rm <- which(colnames(trainRaw) %in% col.rm)
+trainRaw <- trainRaw[, -training.rm]
+testRaw <- testRaw[, -training.rm]
+```
+
+## Data Slicing
+
+Consider the testSet as a validation set, we would like to split the trainSet into a training and testing pair. We will split 75% into training and 25% into testing. This split can also serve to compute the out-of-sample error.
+
+```{r, cache = TRUE}
+set.seed(333)
+in_train <- createDataPartition(trainRaw$classe, p = 0.75, list = FALSE)
+trainData <- trainRaw[in_train, ]
+testData <- trainRaw[-in_train, ]
+trainDim2 <- dim(trainData)
+testDim2 <- dim(testData)
+```
+
+With this split, we have `r trainDim2[1]` observation for the training and `r testDim2[1]` observations for testing. The original `r testDim[1]` observations are now reserved as the validation set.
+
+Next, we remove all variables with near-zero variance. 
+
+```{r, cache = TRUE}
+nzv <- nearZeroVar(trainData)
+trainData <- trainData[, -nzv]
+testData <- testData[, -nzv]
+trainDim2 <- dim(trainData)
+testDim2 <- dim(testData)
+#testRaw <- testRaw[, -nzv]
+```
+
+With this, we are left with `r trainDim2[2]` variables.
+
+Now, we can plot the correlation matrix among these variables. 
+
+```{r}
+cor_mat <- cor(trainData[,-53])
+corrplot(cor_mat, order = 'FPC', method = 'color', type = 'upper', tl.cex = 0.75, tl.col = rgb(0,0,0))
+```
+
+We can find correlations that are considered as highly correlated if the correlation coefficient is greater than 0.8.
+
+```{r}
+highCorr <- findCorrelation(cor_mat, cutoff = 0.8)
+names(trainData)[highCorr]
+```
+
+## Training the Dataset
+
+Using the **Random Forest** algorithm, we can train the trainData set as follows.
+
+```{r, cache = TRUE}
+controlRF <- trainControl(method = 'cv', 5)
+modelRF <- train(classe ~ ., method = 'rf', data = trainData, trControl = controlRF, verbose = FALSE)
+plot(modelRF, main='Accuracy of Random Forest Model')
+```
+
+Next, we estimate the performance of the modelon the validation set.
+
+```{r}
+predictRF <- predict(modelRF, testData)
+confusionMatrix(testData$classe, predictRF)
+accuracy <- postResample(predictRF, testData$classe)
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRF)$overall[1])
+accPer <- format(100*accuracy[1], digits = 3)
+oosePer <- format(100*oose, digits = 2)
+```
+
+The accuracy for the test dataset is `r accPer`%. The out-of-sample error (OOSE) is `r oosePer`%.
+
+## Prediction
+
+Finally, we use the `r testDim[1]` dataset as the validation set. The prediction can be run as follows.
+
+```{r}
+modelRF$finalModel$classes
+plot(modelRF$finalModel, main = 'Model Error with Random Forest Algorithm')
+result <- predict(modelRF, newdata = testRaw)
+#confusionMatrix(testRaw$classe, result)
+print(result)
+```
+
+
